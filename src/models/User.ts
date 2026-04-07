@@ -41,7 +41,7 @@ export interface IUser extends Document {
   }>;
   /** User-selected renewal period (shown to admin with payment proof). */
   subscriptionPlanPreference?: 'week' | 'month' | 'year';
-  refreshToken?: string;
+  refreshTokens?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -74,7 +74,8 @@ const userSchema = new Schema<IUser>(
       enum: ['week', 'month', 'year'],
       trim: true,
     },
-    refreshToken: { type: String, select: false },
+    // Allow multiple concurrent refresh tokens (one per device/session)
+    refreshTokens: { type: [String], select: false },
   },
   { timestamps: true }
 );

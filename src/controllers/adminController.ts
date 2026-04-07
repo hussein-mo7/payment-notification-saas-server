@@ -79,7 +79,7 @@ export const getUsers = async (req: AdminAuthRequest, res: Response, next: NextF
 
     const [data, total] = await Promise.all([
       User.find(filter)
-        .select('-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires')
+        .select('-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -131,7 +131,7 @@ export const updateSubscription = async (
         },
       },
       { new: true }
-    ).select('-passwordHash -refreshToken -verificationToken -resetPasswordToken');
+    ).select('-passwordHash -refreshTokens -verificationToken -resetPasswordToken');
 
     if (!user) {
       next(new NotFoundError('User not found'));

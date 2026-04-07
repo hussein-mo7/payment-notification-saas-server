@@ -37,7 +37,7 @@ const toProfileResponse = (user: Record<string, unknown>) => {
 export const getProfile = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const baseSelect =
-      '-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires';
+      '-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires';
     const user = await User.findById(req.userId)
       .select(req.accessMode === 'viewer' ? baseSelect : `${baseSelect} +viewerPasswordHash`)
       .lean();
@@ -99,7 +99,7 @@ export const updateProfile = async (req: AuthRequest, res: Response, next: NextF
       req.userId,
       { $set: allowed },
       { new: true, runValidators: true }
-    ).select('-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires');
+    ).select('-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires');
 
     if (!user) {
       next(new NotFoundError('User not found'));
@@ -213,7 +213,7 @@ export const uploadSubscriptionPaymentProof = async (
       },
       { new: true, runValidators: true }
     ).select(
-      '-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
+      '-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
     );
 
     if (!updated) {

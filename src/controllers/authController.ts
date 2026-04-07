@@ -128,7 +128,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           ],
         };
 
-    const user = await User.findOne(query).select('+passwordHash +emailVerified +refreshToken');
+    const user = await User.findOne(query).select('+passwordHash +emailVerified +refreshTokens');
 
     if (!user) {
       next(new UnauthorizedError('Invalid credentials'));
@@ -152,7 +152,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
 
     const accessToken = generateAccessToken(user._id.toString(), 'full');
     const refreshToken = generateRefreshToken(user._id.toString(), 'full');
-    user.refreshToken = refreshToken;
+    // Append new refresh token to the user's token list (keep other sessions alive)
+    user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
     await user.save({ validateBeforeSave: false });
 
     res.json({
@@ -193,7 +194,7 @@ export const loginViewer = async (req: Request, res: Response, next: NextFunctio
           ],
         };
 
-    const user = await User.findOne(query).select('+viewerPasswordHash +emailVerified +refreshToken');
+    const user = await User.findOne(query).select('+viewerPasswordHash +emailVerified +refreshTokens');
 
     if (!user) {
       next(new UnauthorizedError('Invalid credentials'));
@@ -227,7 +228,7 @@ export const loginViewer = async (req: Request, res: Response, next: NextFunctio
     const mode: AccessMode = 'viewer';
     const accessToken = generateAccessToken(user._id.toString(), mode);
     const refreshToken = generateRefreshToken(user._id.toString(), mode);
-    user.refreshToken = refreshToken;
+    user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
     await user.save({ validateBeforeSave: false });
 
     res.json({
@@ -251,8 +252,8 @@ export const refresh = async (req: Request, res: Response, next: NextFunction): 
     }
 
     const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.userId).select('+refreshToken');
-    if (!user || user.refreshToken !== refreshToken) {
+    const user = await User.findById(decoded.userId).select('+refreshTokens');
+    if (!user || !Array.isArray(user.refreshTokens) || !user.refreshTokens.includes(refreshToken)) {
       next(new UnauthorizedError('Invalid refresh token'));
       return;
     }
@@ -260,7 +261,8 @@ export const refresh = async (req: Request, res: Response, next: NextFunction): 
     const mode: AccessMode = decoded.accessMode === 'viewer' ? 'viewer' : 'full';
     const accessToken = generateAccessToken(user._id.toString(), mode);
     const newRefreshToken = generateRefreshToken(user._id.toString(), mode);
-    user.refreshToken = newRefreshToken;
+    // Rotate: replace the used token with the new one, keep others
+    user.refreshTokens = (user.refreshTokens || []).map((t) => (t === refreshToken ? newRefreshToken : t));
     await user.save({ validateBeforeSave: false });
 
     res.json({

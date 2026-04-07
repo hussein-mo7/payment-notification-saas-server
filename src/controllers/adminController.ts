@@ -256,7 +256,7 @@ export const setSubscriptionPaymentProofReviewed = async (
 
     const user = await User.findById(userId)
       .select(
-        '-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
+        '-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
       )
       .lean();
 
@@ -366,7 +366,7 @@ export const deleteSubscriptionPaymentProofById = async (
 
     const out = await User.findById(userId)
       .select(
-        '-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
+        '-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
       )
       .lean();
 
@@ -435,7 +435,7 @@ export const deleteSubscriptionPaymentProof = async (
       },
       { new: true }
     ).select(
-      '-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
+      '-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
     );
 
     if (!user) {
@@ -514,7 +514,7 @@ export const clearUserSubscription = async (
         },
       },
       { new: true }
-    ).select('-passwordHash -refreshToken -verificationToken -resetPasswordToken');
+    ).select('-passwordHash -refreshTokens -verificationToken -resetPasswordToken');
 
     if (!user) {
       next(new NotFoundError('User not found'));
@@ -537,7 +537,7 @@ export const getUserDetails = async (
 
     const user = await User.findById(userId)
       .select(
-        '-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
+        '-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -subscriptionPaymentProofPublicId'
       )
       .lean();
 
@@ -1122,7 +1122,7 @@ export const setUserEmailVerification = async (
     await user.save({ validateBeforeSave: false });
     const updated = await User.findById(userId)
       .select(
-        '-passwordHash -refreshToken -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires'
+        '-passwordHash -refreshTokens -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires'
       )
       .lean();
     res.json({ success: true, data: updated });

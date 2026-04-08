@@ -252,18 +252,20 @@ export const refresh = async (req: Request, res: Response, next: NextFunction): 
     }
 
     const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.userId).select('+refreshTokens');
-    if (!user || !Array.isArray(user.refreshTokens) || !user.refreshTokens.includes(refreshToken)) {
+    // Atomically replace the used refresh token with a new one to avoid races
+    const mode: AccessMode = decoded.accessMode === 'viewer' ? 'viewer' : 'full';
+    const newRefreshToken = generateRefreshToken(decoded.userId, mode);
+    const updated = await User.findOneAndUpdate(
+      { _id: decoded.userId, refreshTokens: refreshToken },
+      { $set: { 'refreshTokens.$': newRefreshToken } },
+      { new: true }
+    ).select('+refreshTokens');
+    if (!updated) {
       next(new UnauthorizedError('Invalid refresh token'));
       return;
     }
 
-    const mode: AccessMode = decoded.accessMode === 'viewer' ? 'viewer' : 'full';
-    const accessToken = generateAccessToken(user._id.toString(), mode);
-    const newRefreshToken = generateRefreshToken(user._id.toString(), mode);
-    // Rotate: replace the used token with the new one, keep others
-    user.refreshTokens = (user.refreshTokens || []).map((t) => (t === refreshToken ? newRefreshToken : t));
-    await user.save({ validateBeforeSave: false });
+    const accessToken = generateAccessToken(decoded.userId, mode);
 
     res.json({
       success: true,
@@ -272,6 +274,35 @@ export const refresh = async (req: Request, res: Response, next: NextFunction): 
       accessMode: mode,
       expiresIn: config.jwt.accessExpiresIn,
     });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      next(new BadRequestError('Refresh token required'));
+      return;
+    }
+
+    // Verify token to ensure it's well-formed and get the user id
+    let decoded: any;
+    try {
+      decoded = verifyRefreshToken(refreshToken);
+    } catch (err) {
+      decoded = null;
+    }
+
+    if (decoded && decoded.userId) {
+      await User.updateOne({ _id: decoded.userId }, { $pull: { refreshTokens: refreshToken } });
+    } else {
+      // Best-effort remove if malformed/expired
+      await User.updateOne({ refreshTokens: refreshToken }, { $pull: { refreshTokens: refreshToken } });
+    }
+
+    res.json({ success: true });
   } catch (e) {
     next(e);
   }

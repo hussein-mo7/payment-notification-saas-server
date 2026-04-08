@@ -1,6 +1,7 @@
 import './loadEnv';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { config } from './config';
 import { getBrevoEmailHealth } from './services/verificationEmail';
@@ -9,7 +10,21 @@ import { errorHandler, notFound } from './middleware';
 
 const app = express();
 
-app.use(cors({ origin: true, credentials: true }));
+// Security headers
+app.use(helmet());
+
+// Restrict CORS to configured frontend/admin origins
+const allowedOrigins = [config.urls.frontend, config.urls.admin, 'http://localhost:3000', 'http://127.0.0.1:3000'];
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow non-browser requests (e.g. curl, server-to-server) which have no origin
+      if (!origin) return callback(null, true);
+      return callback(null, allowedOrigins.includes(origin));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());

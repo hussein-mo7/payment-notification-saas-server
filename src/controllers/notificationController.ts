@@ -18,6 +18,13 @@ export const createPaymentNotification = async (
     }
     const messageStored = _stripTrailingAvailableBalanceLine(_normalizeDigits(String(message)));
     const combinedForCard = _normalizeDigits(`${String(title ?? '')}\n${messageStored}`).toLowerCase();
+    
+    // Check for promotional messages from wallet providers (not actual payment notifications).
+    if (_isPromotionalMessageFromPaymentProvider(combinedForCard)) {
+      res.status(200).json({ success: false, reason: 'Promotional message from payment provider' });
+      return;
+    }
+    
     if (_isCardSpendExcluded(combinedForCard)) {
       res.status(200).json({ success: false, reason: 'Card spend excluded' });
       return;
@@ -133,6 +140,41 @@ function _isCardSpendExcluded(combinedLower: string): boolean {
   if (t.includes('تم استلام حركتك من قبل التاجر')) return true;
   if (t.includes('من قبل التاجر') && (t.includes('رقم البطاقة') || t.includes('البطاقة:'))) return true;
   if (t.includes('مبلغ الحركة') && t.includes('رقم البطاقة')) return true;
+  return false;
+}
+
+/**
+ * Promotional/marketing messages from payment providers (not actual payment notifications).
+ * e.g. "وفّرنا عليك أكتر! حوّل أجرة التكسي باستخدام Jawwal Pay بدون أي رسوم..."
+ * Characteristics: marketing links, promotional language, no transaction details.
+ */
+function _isPromotionalMessageFromPaymentProvider(combinedLower: string): boolean {
+  const t = combinedLower;
+  
+  // Marketing/promotional Jawwal messages
+  if (t.includes('وفّرنا عليك')) return true;
+  if (t.includes('حوّل أجرة') && t.includes('بدون أي رسوم')) return true;
+  if (t.includes('للمزيد') && t.includes('http')) return true;
+  if (t.includes('لاستخدام التطبيق') && (t.includes('http') || t.includes('onelink'))) return true;
+  
+  // Generic promotional markers from any wallet
+  const hasPromotionalLanguage = t.includes('عرض') || t.includes('اشتراك') || t.includes('ترويج') || 
+                                  t.includes('promotion') || t.includes('offer') || t.includes('campaign');
+  const hasMarketingLinks = /http[s]?:\/\//.test(t) && 
+                             (t.includes('onelink') || t.includes('qlink') || t.includes('bit.ly') || 
+                              t.includes('tinyurl') || t.includes('short.link'));
+  
+  if (hasPromotionalLanguage && hasMarketingLinks) return true;
+  
+  // Message is just advertising/call-to-action with no amount/transaction data
+  if (!_containsAny(t, ['مبلغ', 'بمبلغ', 'amount', 'received', 'credited', 'تم', 'استلم', 
+                        'transferred', 'paid', 'sent', 'تحويل', 'دفع', 'ايداع', 'إيداع'])) {
+    if (hasMarketingLinks || t.includes('download') || t.includes('تحميل') || 
+        t.includes('تطبيق') || t.includes('app')) {
+      return true;
+    }
+  }
+  
   return false;
 }
 
@@ -805,6 +847,7 @@ function _parseAndroidPaymentNotification(params: {
   const combinedLower = combinedNormalized.toLowerCase();
   if (_isInternalAccountTransferOnly(combinedLower)) return null;
   if (_isCardSpendExcluded(combinedLower)) return null;
+  if (_isPromotionalMessageFromPaymentProvider(combinedLower)) return null;
 
   const fullText = `${titleLower} ${messageLower}`;
   const fullTextLower = fullText;

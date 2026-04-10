@@ -546,9 +546,15 @@ export const getUserDetails = async (
       return;
     }
 
-    const payments = await SubscriptionPayment.find({ userId })
-      .sort({ periodStart: -1 })
-      .lean();
+    const [payments, lastPaymentNotification] = await Promise.all([
+      SubscriptionPayment.find({ userId })
+        .sort({ periodStart: -1 })
+        .lean(),
+      PaymentNotification.findOne({ userId })
+        .sort({ receivedAt: -1 })
+        .select('source title receivedAt')
+        .lean(),
+    ]);
 
     const u = user as Record<string, unknown>;
     const { subscriptionPaymentProofHistory: _hp, ...userRest } = u;
@@ -563,6 +569,7 @@ export const getUserDetails = async (
           ),
         },
         payments,
+        lastPaymentNotification,
       },
     });
   } catch (e) {

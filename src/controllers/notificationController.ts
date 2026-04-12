@@ -25,6 +25,18 @@ export const createPaymentNotification = async (
       return;
     }
     
+    // Check for outgoing/service purchases (not incoming payments).
+    if (_isOutgoingOrServicePurchase(combinedForCard)) {
+      res.status(200).json({ success: false, reason: 'Outgoing transaction or service purchase' });
+      return;
+    }
+    
+    // Check for manual transfer instructions via WhatsApp (not automatic payment notifications).
+    if (_isWhatsAppManualTransferInstruction(combinedForCard)) {
+      res.status(200).json({ success: false, reason: 'Manual WhatsApp transfer instruction' });
+      return;
+    }
+    
     if (_isCardSpendExcluded(combinedForCard)) {
       res.status(200).json({ success: false, reason: 'Card spend excluded' });
       return;
@@ -178,11 +190,52 @@ function _isPromotionalMessageFromPaymentProvider(combinedLower: string): boolea
   return false;
 }
 
+/**
+ * Outgoing transactions or service purchases (not incoming payments).
+ * e.g. "تمت عملية شراء حزمة جوال بنجاح" (mobile package purchase)
+ * e.g. "تم شراء رصيد" (credit purchase)
+ */
+function _isOutgoingOrServicePurchase(combinedLower: string): boolean {
+  const t = combinedLower;
+  // Service/package purchases
+  if (t.includes('عملية شراء') || t.includes('شراء حزمة') || t.includes('شراء رصيد')) return true;
+  if (t.includes('شراء') && (t.includes('جوال') || t.includes('باقة') || t.includes('رصيد'))) return true;
+  if (t.includes('تم شراء')) return true;
+  if (t.includes('تم دفع رسوم') || t.includes('رسوم خدمة')) return true;
+  return false;
+}
+
+/**
+ * Manual transfer instructions via WhatsApp/messaging (not automatic payment notifications).
+ * e.g. "ابعت الاشعار على الوتس على الرقم هادا… المبلغ 7000شيكل"
+ * (Send notification on WhatsApp to this number… Amount 7000 shekels)
+ */
+function _isWhatsAppManualTransferInstruction(combinedLower: string): boolean {
+  const t = combinedLower;
+  // Manual instructions to send money via WhatsApp
+  if (t.includes('ابعت') && t.includes('وتس')) return true;
+  if (t.includes('ابعت') && t.includes('واتس')) return true;
+  if (t.includes('بعت على الوتس')) return true;
+  if (t.includes('بعت على واتس')) return true;
+  if (t.includes('رقم الوتس') || t.includes('رقم واتس')) return true;
+  // Generic "send notification" instructions
+  if (t.includes('ابعت الاشعار') || t.includes('بعت الاشعار')) return true;
+  return false;
+}
+
 /** Remove available-balance clause from SMS (keep transfer line only). Not anchored to EOF — OEMs append \\n + ⁨BOP⁩ after the amount. */
 function _stripTrailingAvailableBalanceLine(input: string): string {
   if (!input) return input;
   let s = input.replace(/\r\n/g, '\n').trim();
-  s = s.replace(/[\s.،\n]*رصيد(?:كم|ك)\s+المتوفر(?:\s+هو)?\s*[\d.,]+/gu, '');
+  
+  // Remove رصيد (balance) lines in various forms:
+  // - "رصيدكم المتوفر" / "رصيد المتوفر" (your available balance)
+  // - "الرصيد الحالي" (current balance)
+  // - "الرصيد:" (balance:)
+  s = s.replace(/[\s.،\n]*رصيد(?:كم|ك)?\s+المتوفر(?:\s+هو)?\s*[\d.,]+/gu, '');
+  s = s.replace(/[\s.،\n]*الرصيد\s+الحالي\s*:?\s*[\d.,ILSNISJODilsnisjod\s$₪]+/gu, '');
+  s = s.replace(/[\s.،\n]*الرصيد\s*:?\s*[\d.,ILSNISJODilsnisjod\s$₪]+/gu, '');
+  
   const lines = s
     .split('\n')
     .map((line) => line.trim())
@@ -819,6 +872,60 @@ function _inferSourceFallback(packageNameLower: string, messageLower: string): s
   return 'Other';
 }
 
+/** Known SMS gateway numbers or sender IDs for payment providers in Palestine/Middle East region. */
+function _isRecognizedSmsSenderId(titleStr: string): boolean {
+  const title = (titleStr || '').trim().toLowerCase();
+  
+  // Known payment provider SMS gateway sender IDs
+  const recognizedSenders = [
+    '1300',      // Palestine Telecom / Jawwal code
+    '121',       // Jawwal short code
+    '2222',      // Palestine Bank common gateway
+    'bop',       // Palestine Bank direct
+    'bank of palestine',
+    'jawwal',
+    'jawwal pay',
+    'palpay',
+    'iburaq',
+    'البنك',
+    'فلسطين',
+    'جوال',
+  ];
+  
+  // Do NOT accept random phone numbers (09x-xxx-xxxx pattern) as SMS senders
+  // Payment providers use short codes or branded sender names, not personal numbers
+  const looksLikePhoneNumber = /^0[0-9]{1,3}[-\s]?[0-9]{3}[-\s]?[0-9]{4}$/.test(title) ||
+                               /^05[0-9][-\s]?[0-9]{3}[-\s]?[0-9]{4}$/.test(title);
+  if (looksLikePhoneNumber) return false;
+  
+  // Check for recognized sender
+  for (const sender of recognizedSenders) {
+    if (title.includes(sender)) return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Reject SMS from unknown/random senders (not recognized payment providers).
+ * e.g. phone number in title = likely fake/forwarded message, not official SMS from bank/wallet.
+ */
+function _isUnrecognizedSmsSender(titleStr: string, messageLower: string): boolean {
+  const title = (titleStr || '').trim().toLowerCase();
+  
+  // If title is a phone number, reject it unless message explicitly mentions recognition from known provider
+  const looksLikePhoneNumber = /^0[0-9]{1,3}[-\s]?[0-9]{3}[-\s]?[0-9]{4}$/.test(title) ||
+                               /^05[0-9][-\s]?[0-9]{3}[-\s]?[0-9]{4}$/.test(title);
+  
+  if (looksLikePhoneNumber) {
+    // Allow only if message itself mentions recognized payment brand
+    const hasBrandMention = _smsHasRecognizedPaymentBrand(`${title} ${messageLower}`);
+    if (!hasBrandMention) return true; // Reject: phone number sender without payment brand
+  }
+  
+  return false;
+}
+
 function _parseAndroidPaymentNotification(params: {
   packageName: string;
   title: string;
@@ -848,6 +955,8 @@ function _parseAndroidPaymentNotification(params: {
   if (_isInternalAccountTransferOnly(combinedLower)) return null;
   if (_isCardSpendExcluded(combinedLower)) return null;
   if (_isPromotionalMessageFromPaymentProvider(combinedLower)) return null;
+  if (_isOutgoingOrServicePurchase(combinedLower)) return null;
+  if (_isWhatsAppManualTransferInstruction(combinedLower)) return null;
 
   const fullText = `${titleLower} ${messageLower}`;
   const fullTextLower = fullText;
@@ -857,6 +966,12 @@ function _parseAndroidPaymentNotification(params: {
   if (smsPkg && !knownPayment && !_smsHasRecognizedPaymentBrand(fullTextLower)) {
     return null;
   }
+  
+  // For SMS: reject if sender is an unrecognized number (not a known payment provider SMS gateway).
+  if (smsPkg && _isUnrecognizedSmsSender(params.title, messageLower)) {
+    return null;
+  }
+  
   const strong = _hasStrongPaymentSignal(fullTextLower);
   const bankOpHints = _hasBankOperationHints(fullTextLower);
   const bankKw = _bankKeywordsMatch(fullTextLower);

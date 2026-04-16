@@ -10,11 +10,16 @@ import { config } from '../config';
 import { sendPasswordResetEmail, sendVerificationEmail } from '../services/verificationEmail';
 import { getPasswordPolicyMessage } from '../utils/passwordPolicy';
 import { VERIFICATION_TTL_MS } from '../constants/verification';
+import { type SessionType } from '../types';
 
 /** Password reset token lifetime (email link). */
 const PASSWORD_RESET_TTL_MS = 24 * 60 * 60 * 1000;
 
 const SALT_ROUNDS = 12;
+
+const getSessionType = (value: unknown): SessionType => {
+  return String(value ?? '').trim().toLowerCase() === 'mobile' ? 'mobile' : 'web';
+};
 
 async function completeEmailVerification(
   rawInput: string
@@ -151,7 +156,8 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     }
 
     const accessToken = generateAccessToken(user._id.toString(), 'full');
-    const refreshToken = generateRefreshToken(user._id.toString(), 'full');
+    const sessionType = getSessionType(req.body?.sessionType);
+    const refreshToken = generateRefreshToken(user._id.toString(), 'full', sessionType);
     // Append new refresh token to the user's token list (keep other sessions alive)
     user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
     await user.save({ validateBeforeSave: false });
@@ -226,8 +232,9 @@ export const loginViewer = async (req: Request, res: Response, next: NextFunctio
     }
 
     const mode: AccessMode = 'viewer';
+    const sessionType = getSessionType(req.body?.sessionType);
     const accessToken = generateAccessToken(user._id.toString(), mode);
-    const refreshToken = generateRefreshToken(user._id.toString(), mode);
+    const refreshToken = generateRefreshToken(user._id.toString(), mode, sessionType);
     user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
     await user.save({ validateBeforeSave: false });
 
@@ -254,7 +261,8 @@ export const refresh = async (req: Request, res: Response, next: NextFunction): 
     const decoded = verifyRefreshToken(refreshToken);
     // Atomically replace the used refresh token with a new one to avoid races
     const mode: AccessMode = decoded.accessMode === 'viewer' ? 'viewer' : 'full';
-    const newRefreshToken = generateRefreshToken(decoded.userId, mode);
+    const sessionType = decoded.sessionType === 'mobile' ? 'mobile' : 'web';
+    const newRefreshToken = generateRefreshToken(decoded.userId, mode, sessionType);
     const updated = await User.findOneAndUpdate(
       { _id: decoded.userId, refreshTokens: refreshToken },
       { $set: { 'refreshTokens.$': newRefreshToken } },

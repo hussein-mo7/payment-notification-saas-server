@@ -5,11 +5,15 @@ export type NotificationType = 'system' | 'admin';
 
 export type AccessMode = 'full' | 'viewer';
 
+export type SessionType = 'web' | 'mobile';
+
 export interface JwtPayload {
   userId: string;
   type: 'access' | 'refresh' | 'admin';
   /** Present on user access/refresh tokens; omitted on legacy tokens (treated as full). */
   accessMode?: AccessMode;
+  /** Session flavor used to control token lifetime. */
+  sessionType?: SessionType;
 }
 
 export interface AuthRequest extends Request {

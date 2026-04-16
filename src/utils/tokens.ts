@@ -1,10 +1,15 @@
 import crypto from 'crypto';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import { config } from '../config';
-import { AccessMode, JwtPayload } from '../types';
+import { AccessMode, JwtPayload, SessionType } from '../types';
 
 const accessExpires = config.jwt.accessExpiresIn as SignOptions['expiresIn'];
 const refreshExpires = config.jwt.refreshExpiresIn as SignOptions['expiresIn'];
+const mobileRefreshExpires = config.jwt.mobileRefreshExpiresIn as SignOptions['expiresIn'];
+
+const getRefreshExpiresIn = (sessionType: SessionType = 'web'): SignOptions['expiresIn'] => {
+  return sessionType === 'mobile' ? mobileRefreshExpires : refreshExpires;
+};
 
 /** Uses JWT_ACCESS_EXPIRES_IN / JWT_REFRESH_EXPIRES_IN from env (defaults in config). */
 export const generateAccessToken = (userId: string, accessMode: AccessMode = 'full'): string => {
@@ -15,11 +20,15 @@ export const generateAccessToken = (userId: string, accessMode: AccessMode = 'fu
   );
 };
 
-export const generateRefreshToken = (userId: string, accessMode: AccessMode = 'full'): string => {
+export const generateRefreshToken = (
+  userId: string,
+  accessMode: AccessMode = 'full',
+  sessionType: SessionType = 'web'
+): string => {
   return jwt.sign(
-    { userId, type: 'refresh', accessMode } as JwtPayload,
+    { userId, type: 'refresh', accessMode, sessionType } as JwtPayload,
     config.jwt.refreshSecret,
-    { expiresIn: refreshExpires }
+    { expiresIn: getRefreshExpiresIn(sessionType) }
   );
 };
 

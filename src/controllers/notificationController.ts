@@ -24,6 +24,12 @@ export const createPaymentNotification = async (
       res.status(200).json({ success: false, reason: 'Promotional message from payment provider' });
       return;
     }
+
+    // Outgoing transfers or debits should never be stored as incoming payment notifications.
+    if (_isOutgoingPaymentNotification(combinedForCard)) {
+      res.status(200).json({ success: false, reason: 'Outgoing payment notification excluded' });
+      return;
+    }
     
     // Check for outgoing/service purchases (not incoming payments).
     if (_isOutgoingOrServicePurchase(combinedForCard)) {
@@ -203,6 +209,39 @@ function _isOutgoingOrServicePurchase(combinedLower: string): boolean {
   if (t.includes('تم شراء')) return true;
   if (t.includes('تم دفع رسوم') || t.includes('رسوم خدمة')) return true;
   return false;
+}
+
+/**
+ * Outgoing transfers/debits that should not be stored as payment receipts.
+ * Keep this ahead of the positive payment heuristics so phrases like
+ * "حوالة صادرة من حسابك بمبلغ 10 شيكل" are rejected consistently.
+ */
+function _isOutgoingPaymentNotification(combinedLower: string): boolean {
+  const t = combinedLower;
+  return _containsAny(t, [
+    'حوالة صادرة',
+    'صادرة من حسابك',
+    'تم التحويل الى',
+    'تم التحويل إلى',
+    'حولت',
+    'تم ارسال',
+    'ارسلت',
+    'تم الدفع لـ',
+    'تم الدفع إلى',
+    'تم الدفع ل',
+    'دفعت',
+    'تم خصم',
+    'تم سحب',
+    'outgoing transfer',
+    'you sent',
+    'you transferred',
+    'you paid',
+    'money sent',
+    'transaction sent',
+    'debited',
+    'withdrawal',
+    'cash out',
+  ]);
 }
 
 /**

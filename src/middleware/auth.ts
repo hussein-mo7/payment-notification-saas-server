@@ -20,8 +20,9 @@ export const authenticate = (req: AuthRequest, _res: Response, next: NextFunctio
       return;
     }
     req.userId = decoded.userId;
-    const mode = decoded.accessMode;
-    req.accessMode = mode === 'viewer' ? 'viewer' : ('full' as AccessMode);
+    const raw = decoded.accessMode;
+    const norm = typeof raw === 'string' ? raw.toLowerCase().trim() : '';
+    req.accessMode = norm === 'viewer' ? 'viewer' : ('full' as AccessMode);
     next();
   } catch {
     next(new UnauthorizedError('Invalid or expired access token'));

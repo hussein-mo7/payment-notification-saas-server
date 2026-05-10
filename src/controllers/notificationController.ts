@@ -274,7 +274,21 @@ function _stripTrailingAvailableBalanceLine(input: string): string {
   s = s.replace(/[\s.،\n]*رصيد(?:كم|ك)?\s+المتوفر(?:\s+هو)?\s*[\d.,]+/gu, '');
   s = s.replace(/[\s.،\n]*الرصيد\s+الحالي\s*:?\s*[\d.,ILSNISJODilsnisjod\s$₪]+/gu, '');
   s = s.replace(/[\s.،\n]*الرصيد\s*:?\s*[\d.,ILSNISJODilsnisjod\s$₪]+/gu, '');
-  
+
+  // English (e.g. Jawwal Pay): "… amount : ILS 5.00. Your current balance is: ILS 5.00."
+  const _currBalAmt = String.raw`[\d.,]+(?:\s*(?:USD|US\$|ILS|NIS|JOD|JDS|EUR|GBP|\$|₪|£|€))?`;
+  s = s.replace(
+    new RegExp(
+      String.raw`[\s.,\n]*(?:your\s+)?current\s+balance\s+is\s*:?\s*${_currBalAmt}`,
+      'gi'
+    ),
+    ''
+  );
+  s = s.replace(
+    new RegExp(String.raw`[\s.,\n]*(?:your\s+)?available\s+balance\s*(?:is)?\s*:?\s*${_currBalAmt}`, 'gi'),
+    ''
+  );
+
   const lines = s
     .split('\n')
     .map((line) => line.trim())
@@ -1182,39 +1196,83 @@ export const getPaymentStats = async (
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const [lastPayment, agg, daily] = await Promise.all([
-      PaymentNotification.findOne({ userId: req.userId }).sort({ receivedAt: -1 }).lean(),
-      PaymentNotification.aggregate([
-        { $match: { userId } },
-        {
-          $group: {
-            _id: null,
-            totalAmount: { $sum: { $ifNull: ['$amount', 0] } },
-            count: { $sum: 1 },
-            incoming: { $sum: { $cond: [{ $eq: ['$direction', 'incoming'] }, 1, 0] } },
-            outgoing: { $sum: { $cond: [{ $eq: ['$direction', 'outgoing'] }, 1, 0] } },
-            unknown: { $sum: { $cond: [{ $eq: ['$direction', 'unknown'] }, 1, 0] } },
-            detected: { $sum: { $cond: [{ $eq: ['$direction', 'detected'] }, 1, 0] } },
+    const utcDayStart = (d: Date) =>
+      new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const todayUtcStart = utcDayStart(now);
+    const weekUtcStart = new Date(todayUtcStart);
+    weekUtcStart.setUTCDate(weekUtcStart.getUTCDate() - 6);
+
+    const [lastPayment, agg, daily, todayCount, weekCount, monthWindowCount, monthWindowSum, topSources] =
+      await Promise.all([
+        PaymentNotification.findOne({ userId: req.userId }).sort({ receivedAt: -1 }).lean(),
+        PaymentNotification.aggregate([
+          { $match: { userId } },
+          {
+            $group: {
+              _id: null,
+              totalAmount: { $sum: { $ifNull: ['$amount', 0] } },
+              count: { $sum: 1 },
+              incoming: { $sum: { $cond: [{ $eq: ['$direction', 'incoming'] }, 1, 0] } },
+              outgoing: { $sum: { $cond: [{ $eq: ['$direction', 'outgoing'] }, 1, 0] } },
+              unknown: { $sum: { $cond: [{ $eq: ['$direction', 'unknown'] }, 1, 0] } },
+              detected: { $sum: { $cond: [{ $eq: ['$direction', 'detected'] }, 1, 0] } },
+            },
           },
-        },
-      ]),
-      PaymentNotification.aggregate([
-        {
-          $match: {
-            userId,
-            receivedAt: { $gte: thirtyDaysAgo },
+        ]),
+        PaymentNotification.aggregate([
+          {
+            $match: {
+              userId,
+              receivedAt: { $gte: thirtyDaysAgo },
+            },
           },
-        },
-        {
-          $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$receivedAt' } },
-            count: { $sum: 1 },
-            sum: { $sum: { $ifNull: ['$amount', 0] } },
+          {
+            $group: {
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$receivedAt' } },
+              count: { $sum: 1 },
+              sum: { $sum: { $ifNull: ['$amount', 0] } },
+            },
           },
-        },
-        { $sort: { _id: 1 } },
-      ]),
-    ]);
+          { $sort: { _id: 1 } },
+        ]),
+        PaymentNotification.countDocuments({
+          userId: req.userId,
+          receivedAt: { $gte: todayUtcStart },
+        }),
+        PaymentNotification.countDocuments({
+          userId: req.userId,
+          receivedAt: { $gte: weekUtcStart },
+        }),
+        PaymentNotification.countDocuments({
+          userId: req.userId,
+          receivedAt: { $gte: thirtyDaysAgo },
+        }),
+        PaymentNotification.aggregate([
+          {
+            $match: { userId, receivedAt: { $gte: thirtyDaysAgo } },
+          },
+          {
+            $group: {
+              _id: null,
+              s: { $sum: { $ifNull: ['$amount', 0] } },
+            },
+          },
+        ]),
+        PaymentNotification.aggregate([
+          {
+            $match: { userId, receivedAt: { $gte: thirtyDaysAgo } },
+          },
+          {
+            $group: {
+              _id: { $ifNull: ['$source', ''] },
+              totalAmount: { $sum: { $ifNull: ['$amount', 0] } },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { totalAmount: -1, count: -1 } },
+          { $limit: 8 },
+        ]),
+      ]);
 
     const g = agg[0] as
       | {
@@ -1227,6 +1285,8 @@ export const getPaymentStats = async (
         }
       | undefined;
 
+    const windowSumRow = monthWindowSum[0] as { s?: number } | undefined;
+
     res.json({
       success: true,
       data: {
@@ -1237,6 +1297,18 @@ export const getPaymentStats = async (
         outgoingCount: g?.outgoing ?? 0,
         unknownCount: g?.unknown ?? 0,
         detectedCount: g?.detected ?? 0,
+        /** UTC calendar day / week; rolling-30 window aligns with dailyLast30Days. */
+        snapshot: {
+          todayCount,
+          weekCount,
+          last30DaysCount: monthWindowCount,
+          last30DaysAmountSum: windowSumRow?.s ?? 0,
+        },
+        topSources: topSources.map((row) => ({
+          source: ((row._id as string) || '').trim() || 'Unknown',
+          totalAmount: row.totalAmount as number,
+          count: row.count as number,
+        })),
         dailyLast30Days: daily.map((d) => ({
           date: d._id as string,
           count: d.count as number,

@@ -146,18 +146,10 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
     const verifyFirstMessage =
       'Please verify your email before signing in. Check your inbox or request a new verification email in the app.';
 
-    const viewerHash =
-      typeof user.viewerPasswordHash === 'string' && user.viewerPasswordHash.length > 0
-        ? user.viewerPasswordHash
-        : null;
-
-    const [mainOk, viewerOk] = await Promise.all([
-      bcrypt.compare(password, user.passwordHash),
-      viewerHash ? bcrypt.compare(password, viewerHash) : Promise.resolve(false),
-    ]);
+    const mainOk = await bcrypt.compare(password, user.passwordHash);
 
     if (!user.emailVerified) {
-      if (mainOk || viewerOk) {
+      if (mainOk) {
         next(new UnauthorizedError(verifyFirstMessage));
         return;
       }
@@ -165,51 +157,23 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       return;
     }
 
-    if (mainOk && !viewerOk) {
-      const accessToken = generateAccessToken(user._id.toString(), 'full');
-      const refreshToken = generateRefreshToken(user._id.toString(), 'full', sessionType);
-      user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
-      await user.save({ validateBeforeSave: false });
-      res.json({
-        success: true,
-        accessToken,
-        refreshToken,
-        accessMode: 'full' as const,
-        expiresIn: config.jwt.accessExpiresIn,
-      });
+    if (!mainOk) {
+      next(new UnauthorizedError('Invalid credentials'));
       return;
     }
 
-    if (!mainOk && viewerOk) {
-      const mode: AccessMode = 'viewer';
-      const accessToken = generateAccessToken(user._id.toString(), mode);
-      const refreshToken = generateRefreshToken(user._id.toString(), mode, sessionType);
-      user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
-      await user.save({ validateBeforeSave: false });
-      res.json({
-        success: true,
-        accessToken,
-        refreshToken,
-        accessMode: 'viewer' as const,
-        expiresIn: config.jwt.accessExpiresIn,
-      });
-      return;
-    }
-
-    if (mainOk && viewerOk) {
-      const accessToken = generateAccessToken(user._id.toString(), 'full');
-      const refreshToken = generateRefreshToken(user._id.toString(), 'full', sessionType);
-      user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
-      await user.save({ validateBeforeSave: false });
-      res.json({
-        success: true,
-        accessToken,
-        refreshToken,
-        accessMode: 'full' as const,
-        expiresIn: config.jwt.accessExpiresIn,
-      });
-      return;
-    }
+    const accessToken = generateAccessToken(user._id.toString(), 'full');
+    const refreshToken = generateRefreshToken(user._id.toString(), 'full', sessionType);
+    user.refreshTokens = Array.isArray(user.refreshTokens) ? user.refreshTokens.concat(refreshToken) : [refreshToken];
+    await user.save({ validateBeforeSave: false });
+    res.json({
+      success: true,
+      accessToken,
+      refreshToken,
+      accessMode: 'full' as const,
+      expiresIn: config.jwt.accessExpiresIn,
+    });
+    return;
 
     next(new UnauthorizedError('Invalid credentials'));
   } catch (e) {
